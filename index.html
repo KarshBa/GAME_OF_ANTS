@@ -76,9 +76,6 @@
     let prevStructures = new Set();
     const antColors = ['red','yellow','cyan','magenta','lime','orange'];
 
-    // Bridge construction pattern
-    const bridgePattern = Array.from({length:20}, (_,i) => i%2===0 ? {dx:1,dy:0} : {dx:0,dy:1});
-
     function dims() { return { cols: Math.floor(canvas.width / cellSize), rows: Math.floor(canvas.height / cellSize) }; }
     function init(blank = true) {
       canvas.width = window.innerWidth;
@@ -143,50 +140,82 @@
       });
     }
     function updateAnts() {
-      // Move or build
-      ants.forEach(ant=>{
+      ants.forEach(ant => {
         if(ant.mode==='bridge'){
-          if(ant.stepIndex<bridgePattern.length){
-            const pos=ant.y*cols+ant.x;
-            const col=(ant.stepIndex%2? '#ffffff': bridgeColor);
-            grid[pos]=1; cellColorMap.set(pos,col);
-            const mv=bridgePattern[ant.stepIndex];
-            ant.x=(ant.x+mv.dx+cols)%cols;
-            ant.y=(ant.y+mv.dy+rows)%rows;
-            ant.stepIndex++;
-            return;
-          } else {
-            ant.mode='langton'; ant.dir=0;
+          // Build diagonal bridge with thickness
+          for(let k=-Math.floor(ant.bridgeWidth/2); k<=Math.floor(ant.bridgeWidth/2); k++){
+            const bx = ant.x + k * ant.perpDx;
+            const by = ant.y + k * ant.perpDy;
+            if(bx>=0 && bx<cols && by>=0 && by<rows){
+              const bpos = by*cols + bx;
+              grid[bpos] = 1;
+              cellColorMap.set(bpos, bridgeColor);
+            }
           }
+          // Move diagonally
+          ant.x = (ant.x + ant.bridgeDx + cols) % cols;
+          ant.y = (ant.y + ant.bridgeDy + rows) % rows;
+          ant.bridgeSteps++;
+          // Check stop conditions
+          let stop = false;
+          if(ant.bridgeSteps >= ant.bridgeLength) stop = true;
+          else {
+            for(const other of ants){
+              if(other !== ant && other.mode==='bridge'){
+                if(Math.abs(ant.x-other.x)<=1 && Math.abs(ant.y-other.y)<=1){ stop = true; break; }
+              }
+            }
+          }
+          if(stop){ ant.mode='langton'; ant.dir = 0; }
+          return;
         }
-        // Classic Langton
-        const i=ant.y*cols+ant.x;
-        if(grid[i]){ ant.dir=(ant.dir+1)%4; grid[i]=0; if(structurePositions.has(i)){antPoints++; pointsDisplay.textContent=`Points: ${antPoints}`;} }
-        else { ant.dir=(ant.dir+3)%4; grid[i]=1; }
-        if(ant.dir===0) ant.y=(ant.y-1+rows)%rows;
-        else if(ant.dir===1) ant.x=(ant.x+1)%cols;
-        else if(ant.dir===2) ant.y=(ant.y+1)%rows;
-        else ant.x=(ant.x-1+cols)%cols;
+        // Langton's Ant behavior
+        const i = ant.y*cols + ant.x;
+        if(grid[i]){
+          ant.dir = (ant.dir+1)%4;
+          grid[i] = 0;
+          if(structurePositions.has(i)){
+            antPoints++; pointsDisplay.textContent = `Points: ${antPoints}`;
+          }
+        } else {
+          ant.dir = (ant.dir+3)%4;
+          grid[i] = 1;
+        }
+        if(ant.dir===0) ant.y = (ant.y-1+rows)%rows;
+        else if(ant.dir===1) ant.x = (ant.x+1)%cols;
+        else if(ant.dir===2) ant.y = (ant.y+1)%rows;
+        else ant.x = (ant.x-1+cols)%cols;
       });
-      // Proximity collision: within one tile
-      const toRemove=new Set(), newAnts=[];
-      for(let i=0;i<ants.length;i++){
-        for(let j=i+1;j<ants.length;j++){
-          const a=ants[i], b=ants[j];
+      // Collision & new bridge ant creation
+      const toRemove = new Set(), newAnts = [];
+      for(let i=0; i<ants.length; i++){
+        for(let j=i+1; j<ants.length; j++){
+          const a = ants[i], b = ants[j];
           if(Math.abs(a.x-b.x)<=1 && Math.abs(a.y-b.y)<=1){
             toRemove.add(i); toRemove.add(j);
-            const sx=Math.round((a.x+b.x)/2), sy=Math.round((a.y+b.y)/2);
-            newAnts.push({ x:sx, y:sy, dir:0, mode:'bridge', stepIndex:0, color:antColors[ants.length%antColors.length] });
+            const sx = Math.round((a.x+b.x)/2), sy = Math.round((a.y+b.y)/2);
+            newAnts.push({
+              x: sx, y: sy,
+              mode: 'bridge', dir: 0,
+              bridgeSteps: 0,
+              bridgeLength: 100,
+              bridgeWidth: 5,
+              bridgeDx: 1,
+              bridgeDy: 1,
+              perpDx: -1,
+              perpDy: 1,
+              color: antColors[ants.length % antColors.length]
+            });
           }
         }
       }
-      ants = ants.filter((_,idx)=>!toRemove.has(idx));
+      ants = ants.filter((_,idx) => !toRemove.has(idx));
       ants.push(...newAnts);
       updateAddAntUI();
     }
     function drawAnts(){ ants.forEach(ant=>{ ctx.fillStyle=ant.color; ctx.fillRect(ant.x*cellSize,ant.y*cellSize,cellSize,cellSize); }); }
     function updateAddAntUI(){ addAntBtn.style.display = (antPoints>=ants.length*100)? 'inline-block':'none'; }
-    addAntBtn.addEventListener('click',()=>{ ants.push({ x:Math.floor(cols/2), y:Math.floor(rows/2), dir:0, mode:'langton', stepIndex:0, color:antColors[ants.length%antColors.length] }); addAntBtn.style.display='none'; });
+    addAntBtn.addEventListener('click',()=>{ ants.push({ x:Math.floor(cols/2), y:Math.floor(rows/2), dir:0, mode:'langton', bridgeSteps:0, bridgeLength:100, bridgeWidth:5, bridgeDx:1, bridgeDy:1, perpDx:-1, perpDy:1, color:antColors[ants.length%antColors.length] }); addAntBtn.style.display='none'; });
     function animate(time){ if(isRunning){ const iv=1000/genPerSec; if(time-lastTime>=iv){ const oldG=grid.slice(); step(); detectStructures(oldG,grid); updateAnts(); drawGrid(); drawAnts(); lastTime=time; }} requestAnimationFrame(animate); }
     function createSetupGrid(){ setupGridEl.innerHTML=''; setupPattern.fill(0); for(let i=0;i<25;i++){ const c=document.createElement('div'); c.className='setupCell'; c.addEventListener('click',()=>{ setupPattern[i]^=1; c.style.background=setupPattern[i]?colorPicker.value:'#000'; }); setupGridEl.append(c);} }
     colorPicker.addEventListener('input',()=>{ document.querySelectorAll('.setupCell').forEach((c,i)=>{ if(setupPattern[i]) c.style.background=colorPicker.value; }); });
