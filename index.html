@@ -7,126 +7,178 @@
   <style>
     html, body { margin:0; height:100%; width:100%; overflow:hidden; background:#000; font-family:system-ui,sans-serif; }
     canvas { display:block; position:absolute; top:0; left:0; width:100vw; height:100vh; background:#000; image-rendering:pixelated; }
-    .uiBox { position:fixed; z-index:10; background:rgba(0,0,0,0.7); color:#fff; padding:6px 10px; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,0.6); display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:14px; user-select:none; }
+    .uiBox { position:fixed; z-index:10; background:rgba(0,0,0,0.8); padding:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:14px; user-select:none; }
     #speedBox { top:10px; left:50%; transform:translateX(-50%); }
     #controlBox { top:58px; left:10px; }
     button { cursor:pointer; padding:2px 10px; border:1px solid #aaa; border-radius:4px; background:#333; color:#fff; }
     button:hover { background:#555; }
     input[type=range] { vertical-align:middle; }
     @media (max-width:600px) { .uiBox { font-size:12px; gap:4px; } #speedBox { top:6px; } #controlBox { top:46px; } }
-    #setupModal { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; color:#fff; }
+    #setupModal { position:fixed; top:0; left:0; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.9); flex-direction:column; z-index:20; color:#fff; }
     #setupGrid { display:grid; grid-template-columns:repeat(5,30px); grid-template-rows:repeat(5,30px); gap:4px; margin-bottom:12px; }
     .setupCell { width:30px; height:30px; background:#000; border:1px solid #555; cursor:pointer; }
     #colorPicker { margin-left:8px; cursor:pointer; width:40px; height:40px; border:none; padding:0; }
   </style>
 </head>
 <body>
-  <div id="setupModal">
-    <h2>Select a 5×5 Starting Pattern & Color</h2>
-    <div style="display:flex; align-items:center;">
-      <div id="setupGrid"></div>
-      <div style="display:flex; flex-direction:column; align-items:center; margin-left:16px;">
-        <label for="colorPicker">Cell Color:</label>
-        <input type="color" id="colorPicker" value="#ffffff" />
-      </div>
-    </div>
-    <button id="setupStartBtn">Start Game</button>
-  </div>
+  <canvas id="canvas"></canvas>
   <div id="speedBox" class="uiBox">
-    <label for="speedSlider">Speed:</label>
-    <input type="range" id="speedSlider" min="0.1" max="50" step="0.1" value="0.25" />
-    <span id="speedVal">0.25</span> gen/sec
+    <label for="speedRange">Speed:</label>
+    <input id="speedRange" type="range" min="1" max="60" value="10" />
+    <span id="speedVal">10</span> gen/sec
   </div>
   <div id="controlBox" class="uiBox">
     <button id="startPauseBtn">Start</button>
     <button id="clearBtn">Clear</button>
     <span id="pointsDisplay">Points: 0</span>
-    <button id="addAntBtn" style="display:none;">Add Ant</button>
-    <button id="add5AntsBtn" style="display:none;">Add 5 Ants</button>
   </div>
-  <canvas id="lifeCanvas"></canvas>
+  <div id="setupModal">
+    <div id="setupGrid"></div>
+    <button id="applySetupBtn">Start Simulation</button>
+  </div>
   <script>
-    const COST_SINGLE = 100;
-    const COST_FIVE = COST_SINGLE * 5;
-    const canvas = document.getElementById('lifeCanvas');
+    const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const speedSlider = document.getElementById('speedSlider');
-    const speedVal = document.getElementById('speedVal');
+    let cols, rows, cellSize, grid, ants = [], isRunning = false, genPerSec = 10, lastTime = 0;
     const startPauseBtn = document.getElementById('startPauseBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const pointsDisplay = document.getElementById('pointsDisplay');
+    const speedRange = document.getElementById('speedRange');
+    const speedVal = document.getElementById('speedVal');
     const setupModal = document.getElementById('setupModal');
     const setupGridEl = document.getElementById('setupGrid');
-    const setupStartBtn = document.getElementById('setupStartBtn');
-    const colorPicker = document.getElementById('colorPicker');
-    const pointsDisplay = document.getElementById('pointsDisplay');
-    const addAntBtn = document.getElementById('addAntBtn');
-    const add5AntsBtn = document.getElementById('add5AntsBtn');
+    const applySetupBtn = document.getElementById('applySetupBtn');
+    const colorPicker = document.createElement('input');
+    colorPicker.type = 'color';
+    colorPicker.id = 'colorPicker';
+    setupModal.append(colorPicker);
 
-    const MAGENTA = '#ff00ff';
-    const CYAN = '#00ffff';
-    let bridgeColor, liveColor;
-    let cellColorMap = new Map();
-
-    let cellSize = 10, cols, rows;
-    let grid, nextGrid;
-    let genPerSec = parseFloat(speedSlider.value);
-    let isRunning = false, lastTime = 0;
-    let setupPattern = new Array(25).fill(0);
-
-    let ants = [];
-    let antPoints = 0;
-    let structurePositions = new Set();
-    let prevStructures = new Set();
-    const antColors = ['red','yellow','cyan','magenta','lime','orange'];
-
-    function dims() { return { cols: Math.floor(canvas.width / cellSize), rows: Math.floor(canvas.height / cellSize) }; }
-    function init(blank = true) {
+    function init(skipDraw=false) {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      ({ cols, rows } = dims());
-      grid = new Array(cols * rows).fill(0);
-      nextGrid = new Array(cols * rows).fill(0);
-      cellColorMap.clear();
-      if (!blank) randomize();
-      drawGrid();
+      cellSize = 10;
+      cols = Math.floor(canvas.width/cellSize);
+      rows = Math.floor(canvas.height/cellSize);
+      grid = new Array(cols*rows).fill(0);
+      ants = [];
+      if (!skipDraw) drawGrid();
     }
-    function randomize() { grid = grid.map(() => Math.random()<0.3?1:0); }
+
     function drawGrid() {
-      ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) {
-        const i = y*cols+x;
-        if (grid[i]) {
-          ctx.fillStyle = cellColorMap.get(i) || liveColor;
-          ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          ctx.fillStyle = grid[y * cols + x] ? '#fff' : '#000';
+          ctx.fillRect(x*cellSize, y*cellSize, cellSize, cellSize);
         }
       }
     }
-    function updateUI() {
-      pointsDisplay.textContent = `Points: ${antPoints}`;
-      addAntBtn.style.display = (antPoints >= COST_SINGLE) ? 'inline-block' : 'none';
-      add5AntsBtn.style.display = (antPoints >= COST_FIVE) ? 'inline-block' : 'none';
-    }
-    addAntBtn.addEventListener('click',()=>{
-      if (antPoints >= COST_SINGLE) {
-        antPoints -= COST_SINGLE;
-        ants.push(createLangtonAnt(cols, rows, ants.length));
-        updateUI();
-      }
-    });
-    add5AntsBtn.addEventListener('click',()=>{
-      if (antPoints >= COST_FIVE) {
-        antPoints -= COST_FIVE;
-        for (let i=0; i<5; i++) ants.push(createLangtonAnt(cols, rows, ants.length));
-        updateUI();
-      }
-    });
-    function createLangtonAnt(cols, rows, idx) {
-      return { x: Math.floor(Math.random()*cols), y: Math.floor(Math.random()*rows), dir:0, mode:'langton', bridgeSteps:0, bridgeLength:100, bridgeWidth:5, bridgeDx:1, bridgeDy:1, perpDx:-1, perpDy:1, color: antColors[idx % antColors.length] };
-    }
-    // ... rest of step, detectStructures, updateAnts, drawAnts, animate, setup etc unchanged ...
 
-    // Initialize and show modal
-    init(true); showModal(); updateUI(); requestAnimationFrame(animate);
+    function drawAnts() {
+      ants.forEach(({x,y,color}) => {
+        ctx.fillStyle = color;
+        ctx.fillRect(x*cellSize, y*cellSize, cellSize, cellSize);
+      });
+    }
+
+    function step() {
+      // Conway's Game of Life logic
+      const newGrid = grid.slice();
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = y*cols+x;
+          let sum = 0;
+          for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++) if(dx||dy) {
+            const nx=(x+dx+cols)%cols, ny=(y+dy+rows)%rows;
+            sum += grid[ny*cols+nx];
+          }
+          if (grid[i]) newGrid[i] = sum===2||sum===3 ? 1 : 0;
+          else newGrid[i] = sum===3 ? 1 : 0;
+        }
+      }
+      grid = newGrid;
+    }
+
+    function detectStructures(oldG,newG) {
+      const stat = oldG.map((v,i)=>v&&newG[i]?i:-1).filter(i=>i>=0);
+      const sSet=new Set(stat), visited=new Set(), clusters=[];
+      stat.forEach(idx=>{
+        if (visited.has(idx)) return;
+        const stack=[idx], cluster=[]; visited.add(idx);
+        while (stack.length) {
+          const c=stack.pop(); cluster.push(c);
+          const y=Math.floor(c/cols), x=c%cols;
+          for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) if(dx||dy) {
+            const ny=(y+dy+rows)%rows, nx=(x+dx+cols)%cols;
+            const ni=ny*cols+nx;
+            if (sSet.has(ni) && !visited.has(ni)) { visited.add(ni); stack.push(ni); }
+          }
+        }
+        clusters.push(cluster);
+      });
+      // You can render or process clusters here
+    }
+
+    function updateAnts() {
+      ants.forEach(ant => {
+        const idx = ant.y*cols + ant.x;
+        const cell = grid[idx];
+        // classic Langton's rules
+        ant.dir = (ant.dir + (cell ? -1 : 1) + 4) % 4;
+        grid[idx] = cell ? 0 : 1;
+        switch(ant.dir) {
+          case 0: ant.y = (ant.y-1+rows) % rows; break;
+          case 1: ant.x = (ant.x+1) % cols; break;
+          case 2: ant.y = (ant.y+1) % rows; break;
+          case 3: ant.x = (ant.x-1+cols) % cols; break;
+        }
+      });
+    }
+
+    function animate(time) {
+      if (isRunning) {
+        const iv=1000/genPerSec;
+        if (time-lastTime>=iv) {
+          // 1) First let each ant turn/flip/move based on the *current* grid:
+          updateAnts();
+          // 2) Draw that immediately:
+          drawGrid();
+          drawAnts();
+          // 3) THEN advance the Game‑of‑Life (if you still want it):
+          const oldG=grid.slice();
+          step();
+          detectStructures(...oldG,grid);
+          lastTime=time;
+        }
+      }
+      requestAnimationFrame(animate);
+    }
+
+    function createSetupGrid() {
+      setupGridEl.innerHTML = '';
+      const setupPattern = new Array(25).fill(0);
+      for (let i=0; i<25; i++) {
+        const c = document.createElement('div');
+        c.className = 'setupCell';
+        c.addEventListener('click', () => { setupPattern[i] = 1 - setupPattern[i]; c.style.background = setupPattern[i] ? colorPicker.value : '#000'; });
+        setupGridEl.append(c);
+      }
+    }
+
+    applySetupBtn.addEventListener('click', () => {
+      createSetupGrid();
+      setupModal.style.display = 'none';
+      // initialize ants based on setupPattern here if desired
+      isRunning = true;
+    });
+
+    speedRange.addEventListener('input', () => { genPerSec = +speedRange.value; speedVal.textContent = speedRange.value; });
+    startPauseBtn.addEventListener('click', () => { isRunning = !isRunning; startPauseBtn.textContent = isRunning ? 'Pause' : 'Start'; });
+    clearBtn.addEventListener('click', () => {
+      isRunning = false; startPauseBtn.textContent = 'Start'; ants = []; grid.fill(0); pointsDisplay.textContent = 'Points: 0'; init(true); setupModal.style.display = 'flex';
+    });
+
+    window.addEventListener('resize', () => init());
+    init(true); createSetupGrid(); requestAnimationFrame(animate);
   </script>
 </body>
 </html>
