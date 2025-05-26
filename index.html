@@ -5,53 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Conway's Game of Life with Langton's Ant</title>
   <style>
-    html, body {
-      margin: 0;
-      height: 100%; width: 100%; overflow: hidden;
-      background: #000; font-family: system-ui, sans-serif;
-    }
-    canvas {
-      display: block; position: absolute;
-      top: 0; left: 0; width: 100vw; height: 100vh;
-      background: #000; image-rendering: pixelated;
-    }
-    .uiBox {
-      position: fixed; z-index: 10;
-      background: rgba(0,0,0,0.7); color: #fff;
-      padding: 6px 10px; border-radius: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.6);
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-      font-size: 14px; user-select: none;
-    }
-    #speedBox { top: 10px; left: 50%; transform: translateX(-50%); }
-    #controlBox { top: 58px; left: 10px; }
-    button { cursor: pointer; padding: 2px 10px; border: 1px solid #aaa;
-      border-radius: 4px; background: #333; color: #fff; }
-    button:hover { background: #555; }
-    input[type=range] { vertical-align: middle; }
-    @media (max-width:600px) {
-      .uiBox { font-size:12px; gap:4px; }
-      #speedBox { top:6px; }
-      #controlBox { top:46px; }
-    }
-    /* Setup Modal */
-    #setupModal {
-      position: fixed; top:0; left:0; width:100vw; height:100vh;
-      background: rgba(0,0,0,0.85); display:flex;
-      align-items:center; justify-content:center;
-      flex-direction:column; z-index:20; color:#fff;
-    }
-    #setupGrid {
-      display:grid; grid-template-columns:repeat(5,30px);
-      grid-template-rows:repeat(5,30px); gap:4px;
-      margin-bottom:12px;
-    }
-    .setupCell {
-      width:30px; height:30px; background:#000;
-      border:1px solid #555; cursor:pointer;
-    }
-    #colorPicker { margin-left:8px; cursor:pointer;
-      width:40px; height:40px; border:none; padding:0; }
+    html, body { margin:0; height:100%; width:100%; overflow:hidden; background:#000; font-family:system-ui,sans-serif; }
+    canvas { display:block; position:absolute; top:0; left:0; width:100vw; height:100vh; background:#000; image-rendering:pixelated; }
+    .uiBox { position:fixed; z-index:10; background:rgba(0,0,0,0.7); color:#fff; padding:6px 10px; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,0.6); display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:14px; user-select:none; }
+    #speedBox { top:10px; left:50%; transform:translateX(-50%); }
+    #controlBox { top:58px; left:10px; }
+    button { cursor:pointer; padding:2px 10px; border:1px solid #aaa; border-radius:4px; background:#333; color:#fff; }
+    button:hover { background:#555; }
+    input[type=range] { vertical-align:middle; }
+    @media (max-width:600px) { .uiBox { font-size:12px; gap:4px; } #speedBox { top:6px; } #controlBox { top:46px; } }
+    #setupModal { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; color:#fff; }
+    #setupGrid { display:grid; grid-template-columns:repeat(5,30px); grid-template-rows:repeat(5,30px); gap:4px; margin-bottom:12px; }
+    .setupCell { width:30px; height:30px; background:#000; border:1px solid #555; cursor:pointer; }
+    #colorPicker { margin-left:8px; cursor:pointer; width:40px; height:40px; border:none; padding:0; }
   </style>
 </head>
 <body>
@@ -92,6 +58,12 @@
     const pointsDisplay = document.getElementById('pointsDisplay');
     const addAntBtn = document.getElementById('addAntBtn');
 
+    const MAGENTA = '#ff00ff';
+    const CYAN = '#00ffff';
+    let bridgeColor;
+    let liveColor;
+    let cellColorMap = new Map();
+
     let cellSize = 10, cols, rows;
     let grid, nextGrid;
     let genPerSec = parseFloat(speedSlider.value);
@@ -104,6 +76,9 @@
     let prevStructures = new Set();
     const antColors = ['red','yellow','cyan','magenta','lime','orange'];
 
+    // Bridge pattern: diagonal line
+    const bridgePattern = Array.from({length:20}, (_,i) => i%2===0 ? {dx:1,dy:0} : {dx:0,dy:1});
+
     function dims() { return { cols: Math.floor(canvas.width / cellSize), rows: Math.floor(canvas.height / cellSize) }; }
     function init(blank = true) {
       canvas.width = window.innerWidth;
@@ -111,26 +86,36 @@
       const d = dims(); cols = d.cols; rows = d.rows;
       grid = new Array(cols * rows).fill(0);
       nextGrid = new Array(cols * rows).fill(0);
+      cellColorMap.clear();
       if (!blank) randomize();
       drawGrid();
     }
     function randomize() { for (let i = 0; i < grid.length; i++) grid[i] = Math.random() < 0.3 ? 1 : 0; }
     function drawGrid() {
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = colorPicker.value;
-      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (grid[y * cols + x])
-        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = y * cols + x;
+          if (grid[i]) {
+            ctx.fillStyle = cellColorMap.has(i) ? cellColorMap.get(i) : liveColor;
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          }
+        }
+      }
     }
     function step() {
-      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-        let n = 0;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) {
-          const nx = (x + dx + cols) % cols, ny = (y + dy + rows) % rows;
-          n += grid[ny * cols + nx];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let n = 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx||dy) {
+            const nx = (x + dx + cols) % cols;
+            const ny = (y + dy + rows) % rows;
+            n += grid[ny * cols + nx];
+          }
+          nextGrid[y * cols + x] = grid[y * cols + x]
+            ? (n === 2 || n === 3) ? 1 : 0
+            : (n === 3) ? 1 : 0;
         }
-        nextGrid[y * cols + x] = grid[y * cols + x]
-          ? (n === 2 || n === 3) ? 1 : 0
-          : (n === 3) ? 1 : 0;
       }
       [grid, nextGrid] = [nextGrid, grid];
     }
@@ -145,10 +130,10 @@
         while (stack.length) {
           const c = stack.pop(); cluster.push(c);
           const y = Math.floor(c / cols), x = c % cols;
-          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) {
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx||dy) {
             const nx = x + dx, ny = y + dy;
-            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
-              const ni = ny * cols + nx;
+            if (nx>=0&&nx<cols&&ny>=0&&ny<rows) {
+              const ni = ny*cols+nx;
               if (sSet.has(ni) && !visited.has(ni)) { visited.add(ni); stack.push(ni); }
             }
           }
@@ -156,131 +141,69 @@
         clusters.push(cluster);
       });
       clusters.forEach(cluster => {
-        const sig = cluster.slice().sort((a, b) => a - b).join(',');
-        if (!prevStructures.has(sig) && cluster.length > 0) {
+        const sig = cluster.slice().sort((a,b)=>a-b).join(',');
+        if (!prevStructures.has(sig) && cluster.length>0) {
           prevStructures.add(sig);
-          cluster.forEach(p => structurePositions.add(p));
+          cluster.forEach(p=>structurePositions.add(p));
           updateAddAntUI();
         }
       });
     }
     function updateAnts() {
-      // record previous positions
-      ants.forEach(ant => { ant.prevX = ant.x; ant.prevY = ant.y; });
-      // step each ant
-      ants.forEach(ant => {
-        const idx = ant.y * cols + ant.x;
-        const cell = grid[idx];
-        if (cell === 1) {
-          ant.dir = (ant.dir + 1) % 4;
-          grid[idx] = 0;
-          if (structurePositions.has(idx)) { antPoints++; pointsDisplay.textContent = `Points: ${antPoints}`; }
-        } else {
-          ant.dir = (ant.dir + 3) % 4;
-          grid[idx] = 1;
+      ants.forEach(ant => { ant.prevX=ant.x; ant.prevY=ant.y; });
+      const toRemove=new Set(), newAnts=[];
+      ants.forEach((ant,idx)=>{
+        if (ant.mode==='bridge') {
+          if (ant.stepIndex < bridgePattern.length) {
+            const pos = ant.y*cols+ant.x;
+            const col = ant.stepIndex%2===0 ? bridgeColor : '#ffffff';
+            grid[pos]=1; cellColorMap.set(pos, col);
+            const mv = bridgePattern[ant.stepIndex];
+            ant.x=(ant.x+mv.dx+cols)%cols; ant.y=(ant.y+mv.dy+rows)%rows;
+            ant.stepIndex++;
+            return;
+          } else {
+            ant.mode='langton'; ant.dir=0;
+          }
         }
-        if (ant.dir === 0) ant.y = (ant.y - 1 + rows) % rows;
-        else if (ant.dir === 1) ant.x = (ant.x + 1) % cols;
-        else if (ant.dir === 2) ant.y = (ant.y + 1) % rows;
-        else if (ant.dir === 3) ant.x = (ant.x - 1 + cols) % cols;
+        // Langton behavior
+        const idxG=ant.y*cols+ant.x;
+        const cell=grid[idxG];
+        if (cell===1) { ant.dir=(ant.dir+1)%4; grid[idxG]=0; if (structurePositions.has(idxG)){antPoints++; pointsDisplay.textContent=`Points: ${antPoints}`;} }
+        else      { ant.dir=(ant.dir+3)%4; grid[idxG]=1; }
+        if (ant.dir===0) ant.y=(ant.y-1+rows)%rows;
+        else if (ant.dir===1) ant.x=(ant.x+1)%cols;
+        else if (ant.dir===2) ant.y=(ant.y+1)%rows;
+        else if (ant.dir===3) ant.x=(ant.x-1+cols)%cols;
       });
-      // detect head-on collisions
-      const toRemove = new Set();
-      const newAnts = [];
-      for (let i = 0; i < ants.length; i++) {
-        for (let j = i + 1; j < ants.length; j++) {
-          const a = ants[i], b = ants[j];
-          if (a.x === b.x && a.y === b.y &&
-              a.prevX === b.x && a.prevY === b.y &&
-              b.prevX === a.x && b.prevY === a.y) {
+      // collisions
+      for (let i=0;i<ants.length;i++){
+        for (let j=i+1;j<ants.length;j++){
+          const a=ants[i], b=ants[j];
+          if (a.x===b.x&&a.y===b.y&&a.prevX===b.x&&a.prevY===b.y&&b.prevX===a.x&&b.prevY===a.y) {
             toRemove.add(i); toRemove.add(j);
-            // create new ant at collision
-            newAnts.push({ x: a.x, y: a.y, dir: 0, color: antColors[ants.length % antColors.length] });
+            newAnts.push({ x:a.x, y:a.y, dir:0, mode:'bridge', stepIndex:0, color:antColors[ants.length%antColors.length] });
           }
         }
       }
-      // filter out collided ants and add new ones
-      ants = ants.filter((_, idx) => !toRemove.has(idx));
-      ants.push(...newAnts);
+      ants=ants.filter((_,i)=>!toRemove.has(i)); ants.push(...newAnts);
       updateAddAntUI();
     }
-    function drawAnts() {
-      ants.forEach(ant => {
-        ctx.fillStyle = ant.color;
-        ctx.fillRect(ant.x * cellSize, ant.y * cellSize, cellSize, cellSize);
-      });
-    }
-    function updateAddAntUI() {
-      const threshold = ants.length * 100;
-      addAntBtn.style.display = antPoints >= threshold ? 'inline-block' : 'none';
-    }
-    addAntBtn.addEventListener('click', () => {
-      ants.push({ x: Math.floor(cols / 2), y: Math.floor(rows / 2), dir: 0,
-        color: antColors[ants.length % antColors.length] });
-      addAntBtn.style.display = 'none';
-    });
-    function animate(time) {
-      if (isRunning) {
-        const iv = 1000 / genPerSec;
-        if (time - lastTime >= iv) {
-          const oldG = grid.slice();
-          step(); detectStructures(oldG, grid);
-          updateAnts(); drawGrid(); drawAnts(); updateAddAntUI();
-          lastTime = time;
-        }
-      }
-      requestAnimationFrame(animate);
-    }
-    function createSetupGrid() {
-      setupGridEl.innerHTML = '';
-      setupPattern.fill(0);
-      for (let i = 0; i < 25; i++) {
-        const c = document.createElement('div');
-        c.className = 'setupCell';
-        c.addEventListener('click', () => {
-          setupPattern[i] ^= 1;
-          c.style.background = setupPattern[i] ? colorPicker.value : '#000';
-        });
-        setupGridEl.append(c);
-      }
-    }
-    colorPicker.addEventListener('input', () => {
-      document.querySelectorAll('.setupCell').forEach((c, i) => {
-        if (setupPattern[i]) c.style.background = colorPicker.value;
-      });
-    });
-    speedSlider.addEventListener('input', () => { genPerSec = parseFloat(speedSlider.value); speedVal.textContent = speedSlider.value; });
-    setupStartBtn.addEventListener('click', () => { init(true); hideModal(); applySetupPattern(); });
-    function showModal() { setupModal.style.display = 'flex'; createSetupGrid(); lastTime = 0; }
-    function hideModal() { setupModal.style.display = 'none'; }
-    function applySetupPattern() {
-      const ox = Math.floor((cols - 5) / 2), oy = Math.floor((rows - 5) / 2);
-      setupPattern.forEach((v, i) => {
-        const x = i % 5, y = Math.floor(i / 5);
-        grid[(oy + y) * cols + (ox + x)] = v;
-      }); drawGrid();
-    }
-    startPauseBtn.addEventListener('click', () => {
-      if (setupModal.style.display !== 'none') return;
-      isRunning = !isRunning;
-      startPauseBtn.textContent = isRunning ? 'Pause' : 'Start';
-    });
-    clearBtn.addEventListener('click', () => {
-      isRunning = false; startPauseBtn.textContent = 'Start';
-      ants = []; antPoints = 0; structurePositions.clear(); prevStructures.clear();
-      pointsDisplay.textContent = 'Points: 0'; addAntBtn.style.display = 'none';
-      init(true); showModal();
-    });
-    canvas.addEventListener('click', e => {
-      if (setupModal.style.display !== 'none') return;
-      const r = canvas.getBoundingClientRect();
-      const cx = Math.floor((e.clientX - r.left) / cellSize);
-      const cy = Math.floor((e.clientY - r.top) / cellSize);
-      grid[cy * cols + cx] ^= 1;
-      drawGrid();
-    });
-    window.addEventListener('resize', () => init());
-    init(true); showModal(); requestAnimationFrame(animate);
+    function drawAnts(){ ants.forEach(ant=>{ ctx.fillStyle=ant.color; ctx.fillRect(ant.x*cellSize,ant.y*cellSize,cellSize,cellSize); }); }
+    function updateAddAntUI(){ const thr=ants.length*100; addAntBtn.style.display=antPoints>=thr?'inline-block':'none'; }
+    addAntBtn.addEventListener('click',()=>{ ants.push({ x:Math.floor(cols/2), y:Math.floor(rows/2), dir:0, mode:'langton', stepIndex:0, color:antColors[ants.length%antColors.length] }); addAntBtn.style.display='none'; });
+    function animate(time){ if(isRunning){ const iv=1000/genPerSec; if(time-lastTime>=iv){ const oldG=grid.slice(); step(); detectStructures(oldG,grid); updateAnts(); drawGrid(); drawAnts(); lastTime=time;} } requestAnimationFrame(animate); }
+    function createSetupGrid(){ setupGridEl.innerHTML=''; setupPattern.fill(0); for(let i=0;i<25;i++){ const c=document.createElement('div'); c.className='setupCell'; c.addEventListener('click',()=>{ setupPattern[i]^=1; c.style.background=setupPattern[i]?colorPicker.value:'#000'; }); setupGridEl.append(c);} }
+    colorPicker.addEventListener('input',()=>{ document.querySelectorAll('.setupCell').forEach((c,i)=>{ if(setupPattern[i])c.style.background=colorPicker.value; }); });
+    speedSlider.addEventListener('input',()=>{ genPerSec=parseFloat(speedSlider.value); speedVal.textContent=speedSlider.value; });
+    setupStartBtn.addEventListener('click',()=>{ liveColor=colorPicker.value.toLowerCase(); bridgeColor = (liveColor===MAGENTA?CYAN:MAGENTA); init(true); hideModal(); applySetupPattern(); });
+    function showModal(){ setupModal.style.display='flex'; createSetupGrid(); lastTime=0; }
+    function hideModal(){ setupModal.style.display='none'; }
+    function applySetupPattern(){ const ox=Math.floor((cols-5)/2), oy=Math.floor((rows-5)/2); setupPattern.forEach((v,i)=>{ const x=i%5, y=Math.floor(i/5); grid[(oy+y)*cols+(ox+x)]=v; }); drawGrid(); }
+    startPauseBtn.addEventListener('click',()=>{ if(setupModal.style.display!=='none')return; isRunning=!isRunning; startPauseBtn.textContent=isRunning?'Pause':'Start'; });
+    clearBtn.addEventListener('click',()=>{ isRunning=false; startPauseBtn.textContent='Start'; ants=[]; antPoints=0; structurePositions.clear(); prevStructures.clear(); cellColorMap.clear(); pointsDisplay.textContent='Points: 0'; addAntBtn.style.display='none'; init(true); showModal(); });
+    canvas.addEventListener('click',e=>{ if(setupModal.style.display!=='none')return; const r=canvas.getBoundingClientRect(); const cx=Math.floor((e.clientX-r.left)/cellSize); const cy=Math.floor((e.clientY-r.top)/cellSize); grid[cy*cols+cx]^=1; drawGrid(); });
+    window.addEventListener('resize',()=>init()); init(true); showModal(); requestAnimationFrame(animate);
   </script>
 </body>
 </html>
