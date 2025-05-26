@@ -144,43 +144,66 @@
     }
     function updateAnts() {
       // Move or build
-      ants.forEach(ant=>{
-        if(ant.mode==='bridge'){
-          if(ant.stepIndex<bridgePattern.length){
-            const pos=ant.y*cols+ant.x;
-            const col=(ant.stepIndex%2? '#ffffff': bridgeColor);
-            grid[pos]=1; cellColorMap.set(pos,col);
-            const mv=bridgePattern[ant.stepIndex];
-            ant.x=(ant.x+mv.dx+cols)%cols;
-            ant.y=(ant.y+mv.dy+rows)%rows;
+      ants.forEach(ant => {
+        if (ant.mode === 'bridge') {
+          if (ant.stepIndex < bridgePattern.length) {
+            const pos = ant.y * cols + ant.x;
+            const col = (ant.stepIndex % 2 ? '#ffffff' : bridgeColor);
+            grid[pos] = 1;
+            cellColorMap.set(pos, col);
+            const mv = bridgePattern[ant.stepIndex];
+            ant.x = (ant.x + mv.dx + cols) % cols;
+            ant.y = (ant.y + mv.dy + rows) % rows;
             ant.stepIndex++;
             return;
           } else {
-            ant.mode='langton'; ant.dir=0;
+            ant.mode = 'langton';
+            ant.dir = 0;
           }
         }
-        // Classic Langton
-        const i=ant.y*cols+ant.x;
-        if(grid[i]){ ant.dir=(ant.dir+1)%4; grid[i]=0; if(structurePositions.has(i)){antPoints++; pointsDisplay.textContent=`Points: ${antPoints}`;} }
-        else { ant.dir=(ant.dir+3)%4; grid[i]=1; }
-        if(ant.dir===0) ant.y=(ant.y-1+rows)%rows;
-        else if(ant.dir===1) ant.x=(ant.x+1)%cols;
-        else if(ant.dir===2) ant.y=(ant.y+1)%rows;
-        else ant.x=(ant.x-1+cols)%cols;
+        // Classic Langton with bridge-cell immunity
+        const i = ant.y * cols + ant.x;
+        const mapping = cellColorMap.get(i);
+        if (mapping === bridgeColor) {
+          // treat magenta as black: left turn only
+          ant.dir = (ant.dir + 3) % 4;
+        } else {
+          if (grid[i]) {
+            ant.dir = (ant.dir + 1) % 4;
+            grid[i] = 0;
+            // remove any color mapping
+            cellColorMap.delete(i);
+            if (structurePositions.has(i)) {
+              antPoints++;
+              pointsDisplay.textContent = `Points: ${antPoints}`;
+            }
+          } else {
+            ant.dir = (ant.dir + 3) % 4;
+            grid[i] = 1;
+          }
+        }
+        // move forward
+        if (ant.dir === 0) ant.y = (ant.y - 1 + rows) % rows;
+        else if (ant.dir === 1) ant.x = (ant.x + 1) % cols;
+        else if (ant.dir === 2) ant.y = (ant.y + 1) % rows;
+        else ant.x = (ant.x - 1 + cols) % cols;
       });
       // Proximity collision: within one tile
-      const toRemove=new Set(), newAnts=[];
-      for(let i=0;i<ants.length;i++){
-        for(let j=i+1;j<ants.length;j++){
-          const a=ants[i], b=ants[j];
-          if(Math.abs(a.x-b.x)<=1 && Math.abs(a.y-b.y)<=1){
-            toRemove.add(i); toRemove.add(j);
-            const sx=Math.round((a.x+b.x)/2), sy=Math.round((a.y+b.y)/2);
-            newAnts.push({ x:sx, y:sy, dir:0, mode:'bridge', stepIndex:0, color:antColors[ants.length%antColors.length] });
+      const toRemove = new Set();
+      const newAnts = [];
+      for (let i = 0; i < ants.length; i++) {
+        for (let j = i + 1; j < ants.length; j++) {
+          const a = ants[i], b = ants[j];
+          if (Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1) {
+            toRemove.add(i);
+            toRemove.add(j);
+            const sx = Math.round((a.x + b.x) / 2);
+            const sy = Math.round((a.y + b.y) / 2);
+            newAnts.push({ x: sx, y: sy, dir: 0, mode: 'bridge', stepIndex: 0, color: antColors[ants.length % antColors.length] });
           }
         }
       }
-      ants = ants.filter((_,idx)=>!toRemove.has(idx));
+      ants = ants.filter((_, idx) => !toRemove.has(idx));
       ants.push(...newAnts);
       updateAddAntUI();
     }
